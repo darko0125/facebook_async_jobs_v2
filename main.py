@@ -7,6 +7,7 @@ from facebook_business.adobjects.adsinsights import AdsInsights
 from facebook_business.adobjects.adreportrun import AdReportRun
 import requests
 import csv
+import pandas as pd
 
 # Step 1: Initialize API
 ACCESS_TOKEN = ''
@@ -66,15 +67,33 @@ for AD_ACCOUNT_ID in AD_ACCOUNT_IDS:
             raise Exception("❌ Async job failed.")
         time.sleep(10)
 
-    # Step 6: Download report
+    # ✅ Step 6: Download report (OUTSIDE the while loop)
     print("📥 Downloading report...")
     results = job.get_result()
 
     if results:
-        with open(OUTPUT_FILE, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=results[0].keys())
-            writer.writeheader()
-            writer.writerows(results)
+        flattened_rows = []
+
+        for row in results:
+            row_dict = dict(row)
+
+            # Flatten action-type lists like 'actions' and 'unique_actions'
+            for action_field in ['actions', 'unique_actions']:
+                if action_field in row_dict and isinstance(row_dict[action_field], list):
+                    try:
+                        for item in row_dict[action_field]:
+                            if isinstance(item, dict) and 'action_type' in item and 'value' in item:
+                                column_name = item['action_type']
+                                row_dict[column_name] = item['value']
+                    except Exception as e:
+                        print(f"Warning: Failed to flatten field '{action_field}' - {e}")
+                    row_dict.pop(action_field, None)
+
+            flat = pd.json_normalize(row_dict, sep='_').to_dict(orient='records')[0]
+            flattened_rows.append(flat)
+
+        df = pd.DataFrame(flattened_rows)
+        df.to_csv(OUTPUT_FILE, index=False, quoting=csv.QUOTE_NONE, escapechar=' ')
         print(f"✅ Report downloaded as {OUTPUT_FILE}")
     else:
         print("⚠️ No data returned in the report.")
